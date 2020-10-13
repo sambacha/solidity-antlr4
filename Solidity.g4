@@ -20,7 +20,7 @@ version
   : versionConstraint versionConstraint? ;
 
 versionOperator
-  : '^' | '~' | '>=' | '>' | '<' | '<=' | '=' ;
+  : '^' | '~' | '>=' | '>' | '<' | '<=' | '=' | '||' ;
 
 versionConstraint
   : versionOperator? VersionLiteral
