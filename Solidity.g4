@@ -1,10 +1,11 @@
+// Copyright 2020 Gonçalo Sá <goncalo.sa@consensys.net>
 // Copyright 2016-2019 Federico Bond <federicobond@gmail.com>
 // Licensed under the MIT license. See LICENSE file in the project root for details.
 
 grammar Solidity;
 
 sourceUnit
-  : (pragmaDirective | importDirective | contractDefinition)* EOF ;
+  : (pragmaDirective | importDirective | contractDefinition | enumDefinition | structDefinition | functionDefinition)* EOF ;
 
 pragmaDirective
   : 'pragma' pragmaName pragmaValue ';' ;
@@ -22,28 +23,19 @@ versionOperator
   : '^' | '~' | '>=' | '>' | '<' | '<=' | '=' ;
 
 versionConstraint
-  : versionOperator? VersionLiteral ;
+  : versionOperator? VersionLiteral
+  | versionOperator? DecimalNumber ;
 
 importDeclaration
   : identifier ('as' identifier)? ;
 
 importDirective
-  : 'import' StringLiteral ('as' identifier)? ';'
-  | 'import' ('*' | identifier) ('as' identifier)? 'from' StringLiteral ';'
-  | 'import' '{' importDeclaration ( ',' importDeclaration )* '}' 'from' StringLiteral ';' ;
-
-NatSpecSingleLine
-  : ('///' .*? [\r\n]) + ;
-
-NatSpecMultiLine
-  : '/**' .*? '*/' ;
-
-natSpec
-  : NatSpecSingleLine
-  | NatSpecMultiLine ;
+  : 'import' StringLiteralFragment ('as' identifier)? ';'
+  | 'import' ('*' | identifier) ('as' identifier)? 'from' StringLiteralFragment ';'
+  | 'import' '{' importDeclaration ( ',' importDeclaration )* '}' 'from' StringLiteralFragment ';' ;
 
 contractDefinition
-  : natSpec? ( 'contract' | 'interface' | 'library' ) identifier
+  : 'abstract'? ( 'contract' | 'interface' | 'library' ) identifier
     ( 'is' inheritanceSpecifier (',' inheritanceSpecifier )* )?
     '{' contractPart* '}' ;
 
@@ -54,7 +46,6 @@ contractPart
   : stateVariableDeclaration
   | usingForDeclaration
   | structDefinition
-  | constructorDefinition
   | modifierDefinition
   | functionDefinition
   | eventDefinition
@@ -62,7 +53,7 @@ contractPart
 
 stateVariableDeclaration
   : typeName
-    ( PublicKeyword | InternalKeyword | PrivateKeyword | ConstantKeyword )*
+    ( PublicKeyword | InternalKeyword | PrivateKeyword | ConstantKeyword | ImmutableKeyword | overrideSpecifier )*
     identifier ('=' expression)? ';' ;
 
 usingForDeclaration
@@ -72,27 +63,29 @@ structDefinition
   : 'struct' identifier
     '{' ( variableDeclaration ';' (variableDeclaration ';')* )? '}' ;
 
-constructorDefinition
-  : 'constructor' parameterList modifierList block ;
-
 modifierDefinition
-  : 'modifier' identifier parameterList? block ;
+  : 'modifier' identifier parameterList? ( VirtualKeyword | overrideSpecifier )* block ;
 
 modifierInvocation
   : identifier ( '(' expressionList? ')' )? ;
 
 functionDefinition
-  : natSpec? 'function' identifier? parameterList modifierList returnParameters? ( ';' | block ) ;
+  : functionDescriptor parameterList modifierList returnParameters? ( ';' | block ) ;
+
+functionDescriptor
+  : 'function' identifier?
+  | ConstructorKeyword
+  | FallbackKeyword
+  | ReceiveKeyword ;
 
 returnParameters
   : 'returns' parameterList ;
 
 modifierList
-  : ( modifierInvocation | stateMutability | ExternalKeyword
-    | PublicKeyword | InternalKeyword | PrivateKeyword )* ;
+  : (ExternalKeyword | PublicKeyword | InternalKeyword | PrivateKeyword | VirtualKeyword | stateMutability | modifierInvocation | overrideSpecifier )* ;
 
 eventDefinition
-  : natSpec? 'event' identifier eventParameterList AnonymousKeyword? ';' ;
+  : 'event' identifier eventParameterList AnonymousKeyword? ';' ;
 
 enumValue
   : identifier ;
@@ -132,8 +125,12 @@ typeName
 userDefinedTypeName
   : identifier ( '.' identifier )* ;
 
+mappingKey
+  : elementaryTypeName
+  | userDefinedTypeName ;
+
 mapping
-  : 'mapping' '(' elementaryTypeName '=>' typeName ')' ;
+  : 'mapping' '(' mappingKey '=>' typeName ')' ;
 
 functionTypeName
   : 'function' functionTypeParameterList
@@ -151,6 +148,7 @@ block
 
 statement
   : ifStatement
+  | tryStatement
   | whileStatement
   | forStatement
   | block
@@ -169,6 +167,14 @@ expressionStatement
 ifStatement
   : 'if' '(' expression ')' statement ( 'else' statement )? ;
 
+tryStatement : 'try' expression returnParameters? block catchClause+ ;
+
+// In reality catch clauses still are not processed as below
+// the identifier can only be a set string: "Error". But plans
+// of the Solidity team include possible expansion so we'll
+// leave this as is, befitting with the Solidity docs.
+catchClause : 'catch' ( identifier? parameterList )? block ;
+
 whileStatement
   : 'while' '(' expression ')' statement ;
 
@@ -179,7 +185,7 @@ forStatement
   : 'for' '(' ( simpleStatement | ';' ) ( expressionStatement | ';' ) expression? ')' statement ;
 
 inlineAssemblyStatement
-  : 'assembly' StringLiteral? assemblyBlock ;
+  : 'assembly' StringLiteralFragment? assemblyBlock ;
 
 doWhileStatement
   : 'do' statement 'while' '(' expression ')' ';' ;
@@ -229,9 +235,11 @@ Ufixed
 expression
   : expression ('++' | '--')
   | 'new' typeName
-  | expression '[' expression ']'
-  | expression '(' functionCallArguments ')'
+  | expression '[' expression? ']'
+  | expression '[' expression? ':' expression? ']'
   | expression '.' identifier
+  | expression '{' nameValueList '}'
+  | expression '(' functionCallArguments ')'
   | '(' expression ')'
   | ('++' | '--') expression
   | ('+' | '-') expression
@@ -257,9 +265,10 @@ primaryExpression
   : BooleanLiteral
   | numberLiteral
   | HexLiteral
-  | StringLiteral
+  | stringLiteral
   | identifier ('[' ']')?
   | TypeKeyword
+  | PayableKeyword
   | tupleExpression
   | typeNameExpression ('[' ']')? ;
 
@@ -296,13 +305,17 @@ assemblyItem
   | assemblyIf
   | BreakKeyword
   | ContinueKeyword
+  | LeaveKeyword
   | subAssembly
   | numberLiteral
-  | StringLiteral
+  | stringLiteral
   | HexLiteral ;
 
 assemblyExpression
-  : assemblyCall | assemblyLiteral ;
+  : assemblyCall | assemblyLiteral | assemblyMember ;
+
+assemblyMember
+  : identifier '.' identifier ;
 
 assemblyCall
   : ( 'return' | 'address' | 'byte' | identifier ) ( '(' assemblyExpression? ( ',' assemblyExpression )* ')' )? ;
@@ -314,7 +327,7 @@ assemblyAssignment
   : assemblyIdentifierOrList ':=' assemblyExpression ;
 
 assemblyIdentifierOrList
-  : identifier | '(' assemblyIdentifierList ')' ;
+  : identifier | assemblyMember | '(' assemblyIdentifierList ')' ;
 
 assemblyIdentifierList
   : identifier ( ',' identifier )* ;
@@ -347,7 +360,7 @@ assemblyIf
   : 'if' assemblyExpression assemblyBlock ;
 
 assemblyLiteral
-  : StringLiteral | DecimalNumber | HexNumber | HexLiteral ;
+  : stringLiteral | DecimalNumber | HexNumber | HexLiteral ;
 
 subAssembly
   : 'assembly' identifier assemblyBlock ;
@@ -364,10 +377,7 @@ numberLiteral
   : (DecimalNumber | HexNumber) NumberUnit? ;
 
 identifier
-  : ('from' | 'calldata' | Identifier) ;
-
-VersionLiteral
-  : [0-9]+ '.' [0-9]+ '.' [0-9]+ ;
+  : ('from' | 'calldata' | 'receive' | 'callback' | PayableKeyword | LeaveKeyword | Identifier) ;
 
 BooleanLiteral
   : 'true' | 'false' ;
@@ -390,7 +400,7 @@ NumberUnit
   : 'wei' | 'szabo' | 'finney' | 'ether'
   | 'seconds' | 'minutes' | 'hours' | 'days' | 'weeks' | 'years' ;
 
-HexLiteral : 'hex' ('"' HexPair* '"' | '\'' HexPair* '\'') ;
+HexLiteral : 'hex' ('"' HexDigits? '"' | '\'' HexDigits? '\'') ;
 
 fragment
 HexPair
@@ -422,16 +432,25 @@ ReservedKeyword
 AnonymousKeyword : 'anonymous' ;
 BreakKeyword : 'break' ;
 ConstantKeyword : 'constant' ;
+ImmutableKeyword : 'immutable' ;
 ContinueKeyword : 'continue' ;
+LeaveKeyword : 'leave' ;
 ExternalKeyword : 'external' ;
 IndexedKeyword : 'indexed' ;
 InternalKeyword : 'internal' ;
 PayableKeyword : 'payable' ;
 PrivateKeyword : 'private' ;
 PublicKeyword : 'public' ;
+VirtualKeyword : 'virtual' ;
 PureKeyword : 'pure' ;
 TypeKeyword : 'type' ;
 ViewKeyword : 'view' ;
+
+ConstructorKeyword : 'constructor' ;
+FallbackKeyword : 'fallback' ;
+ReceiveKeyword : 'receive' ;
+
+overrideSpecifier : 'override' ( '(' userDefinedTypeName (',' userDefinedTypeName)* ')' )? ;
 
 Identifier
   : IdentifierStart IdentifierPart* ;
@@ -444,7 +463,10 @@ fragment
 IdentifierPart
   : [a-zA-Z0-9$_] ;
 
-StringLiteral
+stringLiteral
+  : StringLiteralFragment+ ;
+
+StringLiteralFragment
   : '"' DoubleQuotedStringCharacter* '"'
   | '\'' SingleQuotedStringCharacter* '\'' ;
 
@@ -455,6 +477,9 @@ DoubleQuotedStringCharacter
 fragment
 SingleQuotedStringCharacter
   : ~['\r\n\\] | ('\\' .) ;
+
+VersionLiteral
+  : [0-9]+ '.' [0-9]+ ('.' [0-9]+)? ;
 
 WS
   : [ \t\r\n\u000C]+ -> skip ;

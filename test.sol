@@ -6,6 +6,10 @@ pragma solidity >=0.4.4;
 pragma solidity <0.4.4;
 pragma solidity <=0.4.4;
 pragma solidity =0.4.4;
+pragma solidity 0.4;
+pragma solidity >=0.5.0 <0.7.0;
+pragma solidity ^0.6;
+pragma experimental ABIEncoderV2;
 
 library a {}
 library b {}
@@ -198,6 +202,8 @@ contract test {
 contract test {
     string a = hex"00FF0000";
     string b = hex'00AA0000';
+    string b = hex'00AA_0000';
+    string b = hex"";
 }
 contract test {
     function fun(uint256 a) {
@@ -553,8 +559,16 @@ contract test {
 }
 
 contract test {
-  uint x = 1_000_000;
-  uint y = 0x11_22_33;
+  uint x = 1000000;
+  int x2 = -1000000;
+  int x3 = -1000000 * 200;
+  uint y = .25;
+  uint y2 = 0.25;
+  // uint y3 = 10.25;
+  // uint y4 = 100.25;
+  // uint y5 = 0.0025 * 1e18;
+  uint z = 0x11_22;
+  uint z2 = 0x1122;
 }
 
 contract test {
@@ -568,4 +582,242 @@ contract test {
 
     super._finalization();
   }
+}
+
+contract test {
+  function testFunction() {
+		assembly {
+			function power(base, exponent) -> result {
+        switch exponent
+        case 0 { result := 1 }
+        case 1 { result := base }
+        default {
+            result := power(mul(base, base), div(exponent, 2))
+            switch mod(exponent, 2)
+            case 1 {
+              result := mul(base, result)
+              leave
+            }
+        }
+    }
+		}
+  }
+}
+
+contract Sharer {
+    function sendHalf(address payable addr) public payable returns (uint balance) {
+        require(msg.value % 2 == 0, "Even value required.");
+        uint balanceBeforeTransfer = address(this).balance;
+        addr.transfer(msg.value / 2);
+        // Since transfer throws an exception on failure and
+        // cannot call back here, there should be no way for us to
+        // still have half of the money.
+        assert(address(this).balance == balanceBeforeTransfer - msg.value / 2);
+        return address(this).balance;
+    }
+}
+
+contract FeedConsumer {
+    DataFeed feed;
+    uint errorCount;
+    function rate(address token) public returns (uint value, bool success) {
+        // Permanently disable the mechanism if there are
+        // more than 10 errors.
+        require(errorCount < 10);
+        try feed.getData(token) returns (uint v) {
+            return (v, true);
+        } catch Error(string memory /*reason*/) {
+            // This is executed in case
+            // revert was called inside getData
+            // and a reason string was provided.
+            errorCount++;
+            return (0, false);
+        } catch (bytes memory /*lowLevelData*/) {
+            // This is executed in case revert() was used
+            // or there was a failing assertion, division
+            // by zero, etc. inside getData.
+            errorCount++;
+            return (0, false);
+        } catch {
+            // This is also executed in case revert() was used
+            // or there was a failing assertion, division
+            // by zero, etc. inside getData.
+            errorCount++;
+            return (0, false);
+        }
+    }
+}
+
+
+contract test {
+  receive () external payable {}
+  fallback () external payable {}
+}
+
+pragma solidity >=0.5.0 <0.7.0;
+
+contract D {
+    uint public x;
+    constructor(uint a) public payable {
+        x = a;
+    }
+}
+
+contract C {
+    D d = new D(4); // will be executed as part of C's constructor
+
+    function createD(uint arg) public {
+        D newD = new D(arg);
+        newD.x();
+    }
+
+    function createAndEndowD(uint arg, uint amount) public payable {
+        // Send ether along with the creation
+        D newD = new D{value: amount}(arg);
+        newD.x();
+    }
+}
+
+pragma solidity >0.6.1 <0.7.0;
+
+contract D {
+    uint public x;
+    constructor(uint a) public {
+        x = a;
+    }
+}
+
+contract C {
+    function createDSalted(bytes32 salt, uint arg) public {
+        /// This complicated expression just tells you how the address
+        /// can be pre-computed. It is just there for illustration.
+        /// You actually only need ``new D{salt: salt}(arg)``.
+        address predictedAddress = address(bytes20(keccak256(abi.encodePacked(
+            byte(0xff),
+            address(this),
+            salt,
+            keccak256(abi.encodePacked(
+                type(D).creationCode,
+                arg
+            ))
+        ))));
+
+        D d = new D{salt: salt}(arg);
+        require(address(d) == predictedAddress);
+    }
+}
+
+contract c {
+    string a = "aaa"
+    "bbb";
+    string b = "aaa""bbb";
+    string c = "aaa"  "bbb";
+}
+
+pragma solidity >=0.4.22 <0.7.0;
+
+contract owned {
+    constructor() public { owner = msg.sender; }
+    address payable owner;
+}
+
+contract Destructible is owned {
+    function destroy() virtual public {
+        if (msg.sender == owner) selfdestruct(owner);
+    }
+}
+
+contract Base1 is Destructible {
+    function destroy() public virtual override { /* do cleanup 1 */ super.destroy(); }
+}
+
+
+contract Base2 is Destructible {
+    function destroy() public virtual override { /* do cleanup 2 */ super.destroy(); }
+}
+
+contract Final is Base1, Base2 {
+    function destroy() public override(Base1, Base2) { super.destroy(); }
+}
+
+contract PayableAddress {
+    function payableFn() public pure {
+        address x;
+        address y = payable(x);
+    }
+}
+
+// Solidity 0.6
+enum Locations {
+    Continent,
+    Empire,
+    Union,
+    Country,
+    State,
+    City,
+    Council,
+    Village
+}
+
+struct KeyValuePair {
+    string name;
+    int256 value;
+}
+
+struct GlobalBaseStruct {
+    KeyValuePair[] pairs;
+    Locations location;
+}
+
+
+contract VirtualA {
+    GlobalBaseStruct base;
+    event MyEvent(string _myString);
+    function funA() public virtual {
+        emit MyEvent("from A");
+    }
+}
+
+contract VirtualB {
+    function funA() public virtual {
+        //does nothing
+    }
+}
+
+contract VirtualOverdide is VirtualA, VirtualB {
+    function funA() public override(VirtualB,VirtualA) {
+        emit MyEvent("from B");
+        super.funA();
+    }
+}
+
+contract stateVariables {
+    bytes32 constant adminRole = keccak256("ADMIN_ROLE");
+    uint immutable totalSupply;
+    constructor(uint _totalSupply) public {
+        totalSupply = _totalSupply;
+    }
+}
+
+contract userDefinedTypesAsMappingKeys {
+  mapping (Foo => uint) map;
+}
+
+contract modifierWithVirtualOrOverride {
+  modifier foo() virtual {_;}
+  modifier bar() override {_;}
+}
+
+contract AssemblySlotNotation {
+  function foo() {
+    assembly {
+      ds.slot := position
+      offset := x.offset
+    }
+  }
+}
+
+// top-level function
+function helper(uint x) pure returns (uint) {
+    return x * 2;
 }
